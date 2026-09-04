@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Puntera Digital - Prototipo</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+--bg:#1C1C1E;--surface:#2C2C2E;--surfaceHigh:#3A3A3C;--primary:#F2D16B;--onPrimary:#1C1C1E;
+--onSurface:#E5E5E7;--onSurfaceVar:#8E8E93;--outline:#48484A;--error:#FF453A;--success:#30D158;
+--amber:#FFCC02;--purple:#AF52DE;--cobalt:#0047AB;
+}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#111;display:flex;justify-content:center;align-items:center;min-height:100vh}
+.phone{width:393px;height:852px;background:var(--bg);border-radius:44px;overflow:hidden;position:relative;border:3px solid #333;box-shadow:0 20px 60px rgba(0,0,0,.6)}
+.notch{width:130px;height:6px;background:#111;border-radius:3px;position:absolute;top:10px;left:50%;transform:translateX(-50%);z-index:100}
+.screen{width:100%;height:100%;overflow-y:auto;overflow-x:hidden;transition:background .3s}
+.screen::-webkit-scrollbar{display:none}
+.screen[data-origin="safety"]{--bg:#0047AB;--surface:#0A1929;--surfaceHigh:#132F4C;--primary:#FFFFFF;--onPrimary:#0047AB;--onSurface:#E3F2FD;--onSurfaceVar:#90CAF9;--outline:#1E4976}
+
+/* Screens */
+.view{display:none;width:100%;min-height:100%;padding:16px;padding-top:56px;padding-bottom:100px}
+.view.active{display:block}
+
+/* TopBar */
+.topbar{position:sticky;top:0;z-index:50;padding:14px 16px 10px;background:var(--surface);backdrop-filter:blur(10px)}
+.topbar h1{font-size:18px;color:var(--onSurface);font-weight:700}
+.topbar small{font-size:12px;color:var(--primary)}
+
+/* Cards */
+.card{background:var(--surfaceHigh);border-radius:20px;padding:20px;margin-bottom:16px}
+.card-title{font-size:13px;color:var(--primary);font-weight:600;margin-bottom:12px;text-transform:uppercase;letter-spacing:.5px}
+
+/* Buttons */
+.btn{width:100%;padding:16px;border:none;border-radius:14px;font-size:16px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;transition:all .2s}
+.btn-primary{background:var(--primary);color:var(--onPrimary)}
+.btn-primary:active{transform:scale(.97);opacity:.9}
+.btn-outline{background:transparent;border:1.5px solid var(--outline);color:var(--onSurface)}
+.btn-outline:active{background:var(--surfaceHigh)}
+.btn-green{background:var(--success);color:#fff}
+.btn-amber{background:var(--amber);color:#1C1C1E}
+.btn-purple{background:var(--purple);color:#fff}
+.btn-danger{background:var(--error);color:#fff}
+.btn-sm{padding:12px 16px;font-size:14px;width:auto;flex:1}
+
+/* Inputs */
+.input-group{margin-bottom:14px}
+.input-group label{font-size:12px;color:var(--onSurfaceVar);margin-bottom:6px;display:block}
+.input-group select,.input-group input{width:100%;padding:14px;background:var(--surface);border:1.5px solid var(--outline);border-radius:12px;color:var(--onSurface);font-size:15px;outline:none;-webkit-appearance:none}
+.input-group select:focus,.input-group input:focus{border-color:var(--primary)}
+.row{display:flex;gap:12px}
+.row>*{flex:1}
+
+/* Origin Chips */
+.origin-chips{display:flex;gap:12px}
+.origin-chip{flex:1;padding:16px;border-radius:16px;text-align:center;font-weight:600;font-size:14px;cursor:pointer;border:2px solid transparent;transition:all .2s}
+.origin-chip[data-o="fs"]{background:var(--surface);color:var(--onSurface)}
+.origin-chip[data-o="fs"].active{background:#F2D16B;color:#1C1C1E;border-color:#F2D16B}
+.origin-chip[data-o="sf"]{background:var(--surface);color:var(--onSurface)}
+.origin-chip[data-o="sf"].active{background:#0047AB;color:#fff;border-color:#0047AB}
+
+/* Switch */
+.switch-row{display:flex;justify-content:space-between;align-items:center}
+.switch-row span{font-size:14px;color:var(--onSurface)}
+.switch-row small{font-size:12px;color:var(--onSurfaceVar);display:block;margin-top:2px}
+.toggle{width:52px;height:28px;background:var(--outline);border-radius:14px;position:relative;cursor:pointer;transition:background .2s}
+.toggle.on{background:var(--primary)}
+.toggle::after{content:'';width:22px;height:22px;background:#fff;border-radius:50%;position:absolute;top:3px;left:3px;transition:transform .2s}
+.toggle.on::after{transform:translateX(24px)}
+
+/* Counter Grid */
+.counter-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px}
+.counter{border-radius:16px;background:var(--surfaceHigh);padding:16px}
+.counter .icon{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px;margin-bottom:10px}
+.counter .val{font-size:28px;font-weight:800;color:var(--onSurface)}
+.counter .lbl{font-size:12px;color:var(--onSurfaceVar)}
+
+/* Movement Cards */
+.mv-card{background:var(--surfaceHigh);border-radius:20px;padding:20px;margin-bottom:14px}
+.mv-header{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+.mv-icon{width:48px;height:48px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:24px}
+.mv-title{font-size:16px;font-weight:600;color:var(--onSurface)}
+.mv-sub{font-size:12px;color:var(--onSurfaceVar)}
+.mv-btns{display:flex;gap:12px}
+
+/* Bottom Nav */
+.bottom-nav{position:absolute;bottom:20px;left:12px;right:12px;background:var(--surfaceHigh);border-radius:42px;display:flex;padding:8px 4px;z-index:90}
+.nav-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:10px 0;cursor:pointer;border-radius:20px;transition:background .2s}
+.nav-item.active{background:rgba(242,209,107,.15)}
+.nav-item .ni{font-size:20px;transition:color .2s}
+.nav-item.active .ni{color:var(--primary)}
+.nav-item .nt{font-size:10px;color:var(--onSurfaceVar);font-weight:500}
+.nav-item.active .nt{color:var(--primary);font-weight:700}
+
+/* Login */
+.login-wrap{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;padding:32px;background:linear-gradient(180deg,#1C1C1E,#2C2C2E)}
+.login-card{background:var(--surfaceHigh);border-radius:24px;padding:32px;width:100%;text-align:center}
+.login-icon{width:72px;height:72px;border-radius:16px;background:rgba(242,209,107,.12);display:flex;align-items:center;justify-content:center;font-size:36px;margin:0 auto 16px}
+.login-title{font-size:26px;font-weight:800;color:#F2D16B;margin-bottom:4px}
+.login-sub{font-size:13px;color:#8E8E93;margin-bottom:24px}
+.pin-input{width:100%;padding:18px;font-size:28px;text-align:center;letter-spacing:16px;background:var(--surface);border:1.5px solid var(--outline);border-radius:12px;color:var(--onSurface);outline:none;margin-bottom:16px}
+.pin-input:focus{border-color:#F2D16B}
+.login-footer{font-size:11px;color:#48484A;margin-top:16px}
+
+/* Scanner View */
+.scanner-bg{background:linear-gradient(135deg,#0a0a0a,#1a1a2e);min-height:100%;position:relative}
+.scanner-viewfinder{width:260px;height:260px;border:3px solid var(--primary);border-radius:24px;margin:40px auto 20px;position:relative;display:flex;align-items:center;justify-content:center}
+.scanner-viewfinder::before{content:'';position:absolute;width:40px;height:40px;border-top:4px solid var(--primary);border-left:4px solid var(--primary);top:-2px;left:-2px;border-radius:8px 0 0 0}
+.scanner-viewfinder::after{content:'';position:absolute;width:40px;height:40px;border-bottom:4px solid var(--primary);border-right:4px solid var(--primary);bottom:-2px;right:-2px;border-radius:0 0 8px 0}
+.scan-line{width:90%;height:3px;background:var(--primary);border-radius:2px;animation:scanAnim 2s infinite ease-in-out;box-shadow:0 0 12px var(--primary)}
+@keyframes scanAnim{0%,100%{transform:translateY(-100px);opacity:.3}50%{transform:translateY(100px);opacity:1}}
+.scan-counter{display:inline-flex;align-items:center;gap:8px;padding:12px 24px;border-radius:24px;font-size:14px;font-weight:700;color:#fff;margin:0 auto;position:relative;left:50%;transform:translateX(-50%)}
+.scan-num{font-size:32px}
+
+/* Movement items */
+.mv-item{background:var(--surfaceHigh);border-radius:12px;padding:14px;margin-bottom:8px;display:flex;align-items:center;gap:12px}
+.mv-item-icon{width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:16px}
+.mv-item-text{flex:1}
+.mv-item-text strong{font-size:13px;color:var(--onSurface);display:block}
+.mv-item-text small{font-size:11px;color:var(--onSurfaceVar)}
+
+/* Toast */
+.toast{position:absolute;bottom:120px;left:50%;transform:translateX(-50%);background:var(--success);color:#fff;padding:12px 24px;border-radius:14px;font-size:14px;font-weight:600;z-index:200;opacity:0;transition:opacity .3s;pointer-events:none;white-space:nowrap}
+.toast.show{opacity:1}
+.toast.error{background:var(--error)}
+.toast.warn{background:var(--amber);color:#1C1C1E}
+
+/* Poka-Yoke Alert */
+.alert-overlay{position:absolute;inset:0;background:rgba(0,0,0,.85);z-index:300;display:none;align-items:center;justify-content:center;padding:24px}
+.alert-overlay.show{display:flex}
+.alert-box{background:var(--surface);border-radius:24px;padding:28px;text-align:center;width:100%;border:2px solid var(--error)}
+.alert-box h2{color:var(--error);font-size:20px;margin:12px 0 8px}
+.alert-box p{color:var(--onSurfaceVar);font-size:13px;line-height:1.5;margin-bottom:20px}
+
+</style>
+</head>
+<body>
+
+<div class="phone">
+<div class="notch"></div>
+<div class="screen" id="screen">
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<!-- Poka-Yoke Alert -->
+<div class="alert-overlay" id="pokaAlert">
+<div class="alert-box">
+<div style="font-size:48px">⚠️</div>
+<h2>ALERTA POKA-YOKE</h2>
+<p>Mezcla de orígenes detectada.<br>Foot Safe: 3 unidades<br>Safety: 1 unidad<br><br>No se puede despachar un lote con productos de empresas distintas.</p>
+<button class="btn btn-danger" onclick="closeAlert()" style="margin-bottom:8px">LIMPIAR LOTE</button>
+<button class="btn btn-outline" onclick="closeAlert()">REVISAR</button>
+</div>
+</div>
+
+<!-- LOGIN -->
+<div class="view active" id="loginView">
+<div class="login-wrap">
+<div class="login-card">
+<div class="login-icon">🛡️</div>
+<div class="login-title">Puntera Digital</div>
+<div class="login-sub">Industria 5.0 · Trazabilidad Total</div>
+<input type="password" class="pin-input" id="pinInput" maxlength="4" placeholder="····" inputmode="numeric">
+<button class="btn btn-primary" onclick="doLogin()">🔒 ACCEDER</button>
+<div class="login-footer">Foot Safe · Control de Inventario</div>
+</div>
+</div>
+</div>
+
+<!-- HOME -->
+<div class="view" id="homeView">
+<div class="topbar"><h1>Hola, Admin Almacén</h1><small id="homeOriginLabel">Modo: Foot Safe</small></div>
+<div class="counter-grid" style="margin-top:16px">
+<div class="counter"><div class="icon" style="background:rgba(48,209,88,.15);color:#30D158">📦</div><div class="val">47</div><div class="lbl">Stock</div></div>
+<div class="counter"><div class="icon" style="background:rgba(255,204,2,.15);color:#FFCC02">⏸️</div><div class="val">12</div><div class="lbl">Stand-By</div></div>
+<div class="counter"><div class="icon" style="background:rgba(175,82,222,.15);color:#AF52DE">📋</div><div class="val">5</div><div class="lbl">Cajas Master</div></div>
+<div class="counter"><div class="icon" style="background:rgba(242,209,107,.15);color:#F2D16B">🏷️</div><div class="val">3</div><div class="lbl">Modelos</div></div>
+</div>
+<div style="display:flex;gap:12px;margin-bottom:20px">
+<button class="btn btn-primary btn-sm" onclick="goTo('entryView')">➕ Entrada</button>
+<button class="btn btn-outline btn-sm" onclick="goTo('movView')">↔️ Movimientos</button>
+</div>
+<div style="font-size:15px;font-weight:700;color:var(--onSurface);margin-bottom:12px">Movimientos Recientes</div>
+<div class="mv-item"><div class="mv-item-icon" style="background:rgba(48,209,88,.15);color:#30D158">📥</div><div class="mv-item-text"><strong>Producción · FS-2026A-42-001</strong><small>24/03/2026 22:15 · RACK</small></div></div>
+<div class="mv-item"><div class="mv-item-icon" style="background:rgba(255,204,2,.15);color:#FFCC02">⏸</div><div class="mv-item-text"><strong>Pre-despacho · FS-2026A-40-003</strong><small>24/03/2026 21:50 · ZONA_PREDESPACHO</small></div></div>
+<div class="mv-item"><div class="mv-item-icon" style="background:rgba(255,59,48,.15);color:#FF3B30">📤</div><div class="mv-item-text"><strong>Despacho · SF-2026B-38-001</strong><small>24/03/2026 20:30 · DESPACHADO</small></div></div>
+</div>
+
+<!-- ENTRY -->
+<div class="view" id="entryView">
+<div class="topbar"><h1>Registro de Nacimiento</h1></div>
+<div class="card" style="margin-top:16px">
+<div class="card-title">Origen de Mercancía</div>
+<div class="origin-chips">
+<div class="origin-chip active" data-o="fs" onclick="setOrigin('fs')">✅ Foot Safe</div>
+<div class="origin-chip" data-o="sf" onclick="setOrigin('sf')">Safety</div>
+</div>
+</div>
+<div class="card">
+<div class="card-title">Datos del Producto</div>
+<div class="input-group"><label>Tipo de Entrada</label><select><option>Producción</option><option>Ajuste</option><option>Traslado</option></select></div>
+<div class="input-group"><label>Modelo</label><select><option value="">Seleccionar...</option><option>FS300CMFFPBL</option><option>FS302CMN</option><option>FS400BK</option></select></div>
+<div class="row">
+<div class="input-group"><label>Talla</label><select><option value="">--</option><option>38</option><option>39</option><option>40</option><option>41</option><option>42</option><option>43</option><option>44</option></select></div>
+<div class="input-group"><label>Lote</label><input type="text" placeholder="LOTE-2026-03"></div>
+</div>
+</div>
+<div class="card">
+<div class="switch-row">
+<div><span>Caja Master</span><small id="masterLabel">1 UUID Padre + 8 Hijos</small></div>
+<div class="toggle on" id="masterToggle" onclick="toggleMaster()"></div>
+</div>
+<div id="masterQty" style="margin-top:14px"><div class="input-group"><label>Pares por Caja</label><input type="number" value="8" min="1"></div></div>
+</div>
+<button class="btn btn-primary" onclick="doEntry()">🖨️ REGISTRAR E IMPRIMIR</button>
+</div>
+
+<!-- MOVEMENTS HUB -->
+<div class="view" id="movView">
+<div class="topbar"><h1>Módulos de Movimiento</h1></div>
+<div class="mv-card" style="margin-top:16px">
+<div class="mv-header"><div class="mv-icon" style="background:rgba(255,204,2,.15)">⏸️</div><div><div class="mv-title">Stand-By</div><div class="mv-sub">Pre-despacho → ZONA_PREDESPACHO</div></div></div>
+<div class="mv-btns"><button class="btn btn-outline btn-sm" onclick="goScanner('STANDBY','MANUAL')">👆 Manual</button><button class="btn btn-amber btn-sm" onclick="goScanner('STANDBY','RAPID')">⚡ Ráfaga</button></div>
+</div>
+<div class="mv-card">
+<div class="mv-header"><div class="mv-icon" style="background:rgba(48,209,88,.15)">🚚</div><div><div class="mv-title">Despacho</div><div class="mv-sub">Salida definitiva del inventario</div></div></div>
+<div class="mv-btns"><button class="btn btn-outline btn-sm" onclick="goScanner('DISPATCH','MANUAL')">👆 Manual</button><button class="btn btn-green btn-sm" onclick="goScanner('DISPATCH','RAPID')">⚡ Ráfaga</button></div>
+</div>
+<div class="mv-card">
+<div class="mv-header"><div class="mv-icon" style="background:rgba(175,82,222,.15)">🚫</div><div><div class="mv-title">Calidad / Bajas</div><div class="mv-sub">Hidrolizado · Segunda · Daño Físico</div></div></div>
+<div class="mv-btns"><button class="btn btn-outline btn-sm" onclick="goScanner('QUALITY','MANUAL')">👆 Manual</button><button class="btn btn-purple btn-sm" onclick="goScanner('QUALITY','RAPID')">⚡ Ráfaga</button></div>
+</div>
+</div>
+
+<!-- SCANNER -->
+<div class="view" id="scanView">
+<div class="topbar" style="display:flex;align-items:center;gap:12px">
+<span style="cursor:pointer;font-size:20px" onclick="goTo('movView')">←</span>
+<div><h1 id="scanTitle">Stand-By · Ráfaga</h1><small id="scanOrigin">Modo: Foot Safe</small></div>
+</div>
+<div class="scanner-bg" style="margin-top:16px;border-radius:20px;padding:20px">
+<div class="scanner-viewfinder"><div class="scan-line"></div></div>
+<div style="text-align:center;margin-top:20px">
+<div class="scan-counter" id="scanCounter" style="display:none"></div>
+</div>
+<div style="display:flex;gap:12px;margin-top:20px;justify-content:center">
+<button class="btn btn-outline" style="width:auto;padding:12px 20px;border-radius:50px" onclick="simScan()">📷 Simular Escaneo</button>
+<button class="btn btn-outline" style="width:auto;padding:12px 20px;border-radius:50px" id="pokaBtn" onclick="showAlert()" title="Simular mezcla">⚠️ Poka-Yoke</button>
+</div>
+<div id="scanResults" style="margin-top:16px"></div>
+</div>
+</div>
+
+<!-- TRACEABILITY -->
+<div class="view" id="traceView">
+<div class="topbar"><h1>Historial de Trazabilidad</h1></div>
+<div style="margin-top:16px">
+<div class="mv-item"><div class="mv-item-icon" style="background:rgba(48,209,88,.15);color:#30D158">📥</div><div class="mv-item-text"><strong>Producción · FS-2026A-42-001</strong><small>24/03/2026 22:15 · Admin · RACK</small></div></div>
+<div class="mv-item"><div class="mv-item-icon" style="background:rgba(48,209,88,.15);color:#30D158">📥</div><div class="mv-item-text"><strong>Producción · FS-MB-2026A-42-01</strong><small>24/03/2026 22:15 · Caja Master 8 uds</small></div></div>
+<div class="mv-item"><div class="mv-item-icon" style="background:rgba(255,204,2,.15);color:#FFCC02">⏸</div><div class="mv-item-text"><strong>Stand-By · FS-2026A-40-003</strong><small>24/03/2026 21:50 · ZONA_PREDESPACHO</small></div></div>
+<div class="mv-item"><div class="mv-item-icon" style="background:rgba(255,59,48,.15);color:#FF3B30">📤</div><div class="mv-item-text"><strong>Despacho · SF-2026B-38-001</strong><small>24/03/2026 20:30 · DESPACHADO</small></div></div>
+<div class="mv-item"><div class="mv-item-icon" style="background:rgba(175,82,222,.15);color:#AF52DE">🚫</div><div class="mv-item-text"><strong>Baja · FS-2026A-44-002 · Hidrolizado</strong><small>24/03/2026 19:00 · BAJA</small></div></div>
+</div>
+</div>
+
+<!-- STATS -->
+<div class="view" id="statsView">
+<div class="topbar"><h1>Dashboard</h1></div>
+<div class="card" style="margin-top:16px;text-align:center">
+<div style="display:flex;justify-content:center;gap:8px;margin-bottom:16px">
+<button class="btn btn-primary btn-sm" style="flex:0" onclick="this.style.opacity=1;this.nextElementSibling.style.opacity=.5">📊 Barras</button>
+<button class="btn btn-outline btn-sm" style="flex:0;opacity:.5" onclick="this.style.opacity=1;this.previousElementSibling.style.opacity=.5">🥧 Pastel</button>
+</div>
+<div style="display:flex;align-items:flex-end;justify-content:center;gap:16px;height:180px;padding:0 16px">
+<div style="display:flex;flex-direction:column;align-items:center;gap:4px"><div style="width:40px;background:linear-gradient(to top,rgba(242,209,107,.5),#F2D16B);border-radius:8px 8px 0 0;height:140px;animation:grow .8s ease-out"></div><span style="font-size:10px;color:var(--onSurfaceVar)">42</span></div>
+<div style="display:flex;flex-direction:column;align-items:center;gap:4px"><div style="width:40px;background:linear-gradient(to top,rgba(48,209,88,.5),#30D158);border-radius:8px 8px 0 0;height:100px;animation:grow .8s ease-out"></div><span style="font-size:10px;color:var(--onSurfaceVar)">40</span></div>
+<div style="display:flex;flex-direction:column;align-items:center;gap:4px"><div style="width:40px;background:linear-gradient(to top,rgba(175,82,222,.5),#AF52DE);border-radius:8px 8px 0 0;height:60px;animation:grow .8s ease-out"></div><span style="font-size:10px;color:var(--onSurfaceVar)">38</span></div>
+<div style="display:flex;flex-direction:column;align-items:center;gap:4px"><div style="width:40px;background:linear-gradient(to top,rgba(255,204,2,.5),#FFCC02);border-radius:8px 8px 0 0;height:80px;animation:grow .8s ease-out"></div><span style="font-size:10px;color:var(--onSurfaceVar)">44</span></div>
+</div>
+@keyframes grow{from{height:0}}
+</div>
+<div style="font-size:15px;font-weight:700;color:var(--onSurface);margin-bottom:12px">Detalle de Stock</div>
+<div class="mv-item"><div class="mv-item-icon" style="background:rgba(242,209,107,.15);color:var(--primary);font-weight:800;font-size:14px">42</div><div class="mv-item-text"><strong>FS300CMFFPBL</strong><small>Lote: 2026-A</small></div><div style="font-size:24px;font-weight:800;color:var(--primary)">18</div></div>
+<div class="mv-item"><div class="mv-item-icon" style="background:rgba(242,209,107,.15);color:var(--primary);font-weight:800;font-size:14px">40</div><div class="mv-item-text"><strong>FS302CMN</strong><small>Lote: 2026-A</small></div><div style="font-size:24px;font-weight:800;color:var(--primary)">15</div></div>
+<div class="mv-item"><div class="mv-item-icon" style="background:rgba(242,209,107,.15);color:var(--primary);font-weight:800;font-size:14px">38</div><div class="mv-item-text"><strong>FS400BK</strong><small>Lote: 2026-B</small></div><div style="font-size:24px;font-weight:800;color:var(--primary)">14</div></div>
+</div>
+
+<!-- BOTTOM NAV -->
+<div class="bottom-nav" id="bottomNav" style="display:none">
+<div class="nav-item active" onclick="navTo(0)"><span class="ni">🏠</span><span class="nt">Inicio</span></div>
+<div class="nav-item" onclick="navTo(1)"><span class="ni">📋</span><span class="nt">Entrada</span></div>
+<div class="nav-item" onclick="navTo(2)"><span class="ni">↔️</span><span class="nt">Movim.</span></div>
+<div class="nav-item" onclick="navTo(3)"><span class="ni">🕐</span><span class="nt">Traza</span></div>
+<div class="nav-item" onclick="navTo(4)"><span class="ni">📊</span><span class="nt">Stats</span></div>
+</div>
+
+</div>
+</div>
+
+<script>
+const views=['homeView','entryView','movView','traceView','statsView'];
+const screen=document.getElementById('screen');
+let currentOrigin='fs';
+let scanMode='',scanType='',scanCount=0;
+
+function goTo(id){
+  document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  if(id==='scanView')document.getElementById('bottomNav').style.display='none';
+  else document.getElementById('bottomNav').style.display='flex';
+}
+
+function navTo(i){
+  document.querySelectorAll('.nav-item').forEach((n,j)=>n.classList.toggle('active',j===i));
+  goTo(views[i]);
+}
+
+function doLogin(){
+  const pin=document.getElementById('pinInput').value;
+  if(pin==='1234'||pin==='0000'){
+    goTo('homeView');
+    document.getElementById('bottomNav').style.display='flex';
+  } else {
+    showToast('PIN incorrecto','error');
+  }
+}
+
+function setOrigin(o){
+  currentOrigin=o;
+  document.querySelectorAll('.origin-chip').forEach(c=>c.classList.toggle('active',c.dataset.o===o));
+  screen.setAttribute('data-origin',o==='sf'?'safety':'');
+  document.getElementById('homeOriginLabel').textContent='Modo: '+(o==='fs'?'Foot Safe':'Safety');
+  document.getElementById('scanOrigin').textContent='Modo: '+(o==='fs'?'Foot Safe':'Safety');
+}
+
+function toggleMaster(){
+  const t=document.getElementById('masterToggle');
+  t.classList.toggle('on');
+  const on=t.classList.contains('on');
+  document.getElementById('masterQty').style.display=on?'block':'none';
+  document.getElementById('masterLabel').textContent=on?'1 UUID Padre + 8 Hijos':'Unidad individual';
+}
+
+function doEntry(){
+  const p=currentOrigin==='fs'?'FS':'SF';
+  showToast('✓ Registrado: '+p+'-2026A-42-001');
+  setTimeout(()=>showToast('Impresión enviada a BarTender'),1500);
+}
+
+function goScanner(mode,type){
+  scanMode=mode;scanType=type;scanCount=0;
+  const titles={STANDBY:'Stand-By',DISPATCH:'Despacho',QUALITY:'Calidad / Bajas'};
+  document.getElementById('scanTitle').textContent=titles[mode]+' · '+(type==='RAPID'?'Ráfaga':'Manual');
+  const c=document.getElementById('scanCounter');
+  if(type==='RAPID'){c.style.display='block';updateCounter();}else{c.style.display='none';}
+  document.getElementById('scanResults').innerHTML='';
+  goTo('scanView');
+}
+
+function updateCounter(){
+  const colors={STANDBY:'#FFCC02',DISPATCH:'#30D158',QUALITY:'#AF52DE'};
+  document.getElementById('scanCounter').innerHTML=
+    '<span style="background:'+colors[scanMode]+';padding:12px 24px;border-radius:24px;display:inline-flex;align-items:center;gap:8px">📷 <span class="scan-num">'+scanCount+'</span> escaneados</span>';
+}
+
+function simScan(){
+  scanCount++;
+  const p=currentOrigin==='fs'?'FS':'SF';
+  const uuid=p+'-2026A-42-'+String(scanCount).padStart(3,'0');
+  if(scanType==='RAPID'){
+    updateCounter();
+    const r=document.getElementById('scanResults');
+    r.innerHTML='<div class="mv-item" style="animation:fadeIn .3s"><div class="mv-item-icon" style="background:rgba(48,209,88,.15);color:#30D158">✓</div><div class="mv-item-text"><strong>'+uuid+'</strong><small>Modelo: FS300CMFFPBL · Talla: 42</small></div></div>'+r.innerHTML;
+    showToast('✓ '+uuid);
+    try{new AudioContext().createOscillator().connect(new AudioContext().destination)}catch(e){}
+  } else {
+    showToast('UUID: '+uuid+' → '+{STANDBY:'ZONA_PREDESPACHO',DISPATCH:'Agregado a lote',QUALITY:'Seleccione motivo'}[scanMode]);
+  }
+}
+
+function showAlert(){document.getElementById('pokaAlert').classList.add('show')}
+function closeAlert(){document.getElementById('pokaAlert').classList.remove('show')}
+
+function showToast(msg,type){
+  const t=document.getElementById('toast');
+  t.textContent=msg;t.className='toast show'+(type?' '+type:'');
+  setTimeout(()=>t.classList.remove('show'),2000);
+}
+
+document.getElementById('pinInput').addEventListener('keydown',e=>{if(e.key==='Enter')doLogin()});
+</script>
+<style>@keyframes fadeIn{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}</style>
+</body>
+</html>

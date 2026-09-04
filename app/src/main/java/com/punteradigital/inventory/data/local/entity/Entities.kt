@@ -1,0 +1,182 @@
+package com.punteradigital.inventory.data.local.entity
+
+import androidx.room.Entity
+import androidx.room.Index
+import androidx.room.PrimaryKey
+
+/**
+ * Represents a single unit (a pair of boots) with complete traceability.
+ * UUID format: {FS|SF}-{LOTE}-{TALLA}-{SEQ}  e.g. FS-2026A-42-001
+ */
+@Entity(
+    tableName = "products",
+    indices = [
+        // status is the most queried column: AVAILABLE, STB, DISPATCHED, BAJA_*, MUESTRA
+        // Avoids full table scans on every counter refresh and list query
+        Index(value = ["status"]),
+        // parentUuid used for master box child lookups
+        Index(value = ["parentUuid"]),
+        // Composite for origin-filtered status queries
+        Index(value = ["origin", "status"])
+    ]
+)
+data class ProductEntity(
+    @PrimaryKey val uuid: String,         // FS-xxxx or SF-xxxx
+    val parentUuid: String? = null,       // If child of a Master Box
+    val origin: String,                   // "FOOT_SAFE" or "SAFETY"
+    val model: String,                    // e.g. "FS300CMFFPBL"
+    val size: String,                     // e.g. "42"
+    val lot: String,                      // e.g. "LOTE-2026-03"
+    val entryType: String,                // "PRODUCCION", "AJUSTE", "TRASLADO"
+    val status: String = "AVAILABLE",     // AVAILABLE, STB, DISPATCHED, BAJA_*
+    val location: String = "RACK",        // RACK, ZONA_PREDESPACHO, DESPACHADO
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis()
+)
+
+@Entity(
+    tableName = "catalog_models",
+    indices = [
+        Index(value = ["isActive"]),
+        Index(value = ["code"], unique = true)
+    ]
+)
+data class CatalogModelEntity(
+    @PrimaryKey val id: String = java.util.UUID.randomUUID().toString(),
+    val code: String,
+    val name: String,
+    val sizeMin: Int = 36,
+    val sizeMax: Int = 46,
+    val pairsPerBox: Int = 8,
+    val isActive: Boolean = true,
+    val imageUri: String? = null,
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis()
+)
+
+/**
+ * Represents a Master Box (Caja Master) containing N child units.
+ * UUID format: {FS|SF}-MB-{LOTE}-{TALLA}-{SEQ}
+ */
+@Entity(
+    tableName = "master_boxes",
+    indices = [
+        // isComplete + status frequently queried together for incomplete box lookups
+        Index(value = ["isComplete", "status"]),
+        // model+size+origin for Smart Entry compatibility checks
+        Index(value = ["model", "size", "origin"])
+    ]
+)
+data class MasterBoxEntity(
+    @PrimaryKey val uuid: String,         // Parent UUID with MB marker
+    val origin: String,                   // "FOOT_SAFE" or "SAFETY"
+    val model: String,
+    val size: String,
+    val lot: String,
+    val childCount: Int,                  // Total children (default 8)
+    val activeChildCount: Int,            // Children still in box
+    val isComplete: Boolean = true,       // False when a child is removed
+    val status: String = "COMPLETE",      // COMPLETE, PENDIENTE_POR_RELLENAR
+    val createdAt: Long = System.currentTimeMillis()
+)
+
+/**
+ * Movement tracking for full traceability.
+ */
+@Entity(
+    tableName = "movements",
+    indices = [
+        // type+timestamp: used by analytics (getTopClients, getEntryMovements)
+        Index(value = ["type", "timestamp"]),
+        // uuid: used for per-product movement history lookups
+        Index(value = ["uuid"])
+    ]
+)
+data class MovementEntity(
+    @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val uuid: String,                     // UUID of the product or master box
+    val type: String,                     // "IN", "STB", "OUT", "BAJA", "MUESTRA"
+    val reason: String,                   // Entry type or baja reason
+    val observation: String = "",
+    val cliente: String = "",             // Client name for traceability
+    val observacionesExtra: String = "",  // Additional observations
+    val location: String = "",            // Target location
+    val timestamp: Long = System.currentTimeMillis(),
+    val userId: String
+)
+
+/**
+ * Sync queue for offline-first resilience.
+ * Stores pending operations to sync with cloud/BarTender when connection restores.
+ */
+@Entity(tableName = "sync_queue")
+data class SyncQueueItem(
+    @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val payload: String,                  // JSON serialized data
+    val endpoint: String,                 // "BARTENDER" or "SHEETS"
+    val status: String = "PENDING",       // PENDING, SYNCED, FAILED
+    val retryCount: Int = 0,
+    val createdAt: Long = System.currentTimeMillis(),
+    val syncedAt: Long? = null
+)
+
+/**
+ * User entity for PIN-based authentication.
+ */
+@Entity(tableName = "users")
+data class UserEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    val pin: String,                      // Stored as SHA-256 hash in production
+    val role: String                      // "ADMIN", "OPERADOR"
+)
+
+/**
+ * Represents a label generated by the Empaque area BEFORE it enters the warehouse.
+ * It serves as a "Pre-Entry" that the warehouse can confirm without scanning.
+ */
+@Entity(
+    tableName = "labels",
+    indices = [
+        Index(value = ["status"]),
+        Index(value = ["model", "size"]),
+        Index(value = ["batchId"]),
+        Index(value = ["parentLabelUuid"])
+    ]
+)
+data class LabelEntity(
+    @PrimaryKey val uuid: String,
+    val batchId: String,                  // Groups labels generated together
+    val origin: String,
+    val model: String,
+    val size: String,
+    val lot: String,
+    val labelType: String,                // "INDIVIDUAL" or "MASTER_BOX"
+    val labelFormat: String,              // specific label format selected
+    val parentLabelUuid: String? = null,
+    val status: String = "CREATED",       // CREATED -> PRINTED -> ENTERED, or DELETED
+    val createdBy: String,                // userId
+    val createdAt: Long = System.currentTimeMillis(),
+    val printedAt: Long? = null,
+    val enteredAt: Long? = null,
+    val enteredBy: String? = null
+)
+
+/**
+ * Summary Data Class used by DAO to group labels by Batch for the UI.
+ * Not a Room @Entity.
+ */
+data class LabelBatchSummary(
+    val batchId: String,
+    val model: String,
+    val size: String,
+    val lot: String,
+    val labelType: String,
+    val labelFormat: String,
+    val origin: String,
+    val createdBy: String,
+    val createdAt: Long,
+    val totalCount: Int,
+    val printedCount: Int,
+    val enteredCount: Int
+)

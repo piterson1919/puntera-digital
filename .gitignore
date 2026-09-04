@@ -1,0 +1,29 @@
+# ─── Build outputs ───
+/build/
+/app/build/
+*.apk
+*.aab
+
+# ─── Gradle ───
+.gradle/
+gradle-wrapper.jar
+
+# ─── IDE ───
+.idea/
+*.iml
+.kotlin/
+
+# ─── Local config (contiene rutas de tu PC) ───
+local.properties
+
+# ─── JVM heap dumps (archivos enormes) ───
+*.hprof
+*.log
+
+# ─── OS generated ───
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ─── Node modules (si se usan herramientas npm) ───
+node_modules/
