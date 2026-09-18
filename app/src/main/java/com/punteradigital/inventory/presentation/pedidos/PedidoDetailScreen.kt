@@ -625,7 +625,7 @@ fun CameraScannerDialog(
                                     .also { analysis ->
                                         val barcodeScanner = BarcodeScanning.getClient()
 
-                                        analysis.setAnalyzer(ContextCompat.getMainExecutor(ctx)) { imageProxy ->
+                                        analysis.setAnalyzer(com.punteradigital.inventory.presentation.scanner.components.CameraAnalysisExecutor.executor) { imageProxy ->
                                             @androidx.annotation.OptIn(androidx.camera.core.ExperimentalGetImage::class)
                                             val mediaImage = imageProxy.image
                                             if (mediaImage != null) {

@@ -22,7 +22,11 @@ import com.punteradigital.inventory.data.local.SyncPreferences
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.text.SimpleDateFormat
 import java.util.*
 import javax.inject.Inject
@@ -97,7 +101,16 @@ class InventoryViewModel @Inject constructor(
     val totalDispatched by lazy { dao.getTotalDispatchedCount() }
     val totalMovements by lazy { dao.getTotalMovementCount() }
     val rackOccupancy by lazy { dao.getProductCountByLocation() }
-    val entryMovements by lazy { dao.getEntryMovements() }
+    private val _entryMovements = MutableStateFlow<List<MovementEntity>>(emptyList())
+    val entryMovements: StateFlow<List<MovementEntity>> = _entryMovements.asStateFlow()
+
+    private val _isLoadingEntryMovements = MutableStateFlow(false)
+    val isLoadingEntryMovements: StateFlow<Boolean> = _isLoadingEntryMovements.asStateFlow()
+
+    private var entryMovementsOffset = 0
+    private var hasMoreEntryMovements = true
+    private var qrSearchJob: Job? = null
+    private val catalogSyncMutex = Mutex()
 
     private val _qrSearchResults = MutableStateFlow<List<ProductEntity>>(emptyList())
     val qrSearchResults: StateFlow<List<ProductEntity>> = _qrSearchResults.asStateFlow()
@@ -115,15 +128,23 @@ class InventoryViewModel @Inject constructor(
     val isRackLocked: StateFlow<Boolean> = _isRackLocked.asStateFlow()
 
     init {
+        loadMoreEntryMovements()
+
         viewModelScope.launch {
             seedDefaultCatalogIfEmpty()
             syncCatalogFromServer()
+            syncUsersFromServer()
         }
 
         inventorySyncRepository.connectRealtime { event ->
             if (event.entityType == "catalog_model") {
                 viewModelScope.launch {
                     applyCatalogModelEvent(event)
+                }
+            }
+            if (event.entityType == "user") {
+                viewModelScope.launch {
+                    applyUserEvent(event)
                 }
             }
         }
@@ -140,6 +161,7 @@ class InventoryViewModel @Inject constructor(
                     }
 
                     syncCatalogFromServer()
+                    syncUsersFromServer()
                 }
             }
         }
@@ -161,36 +183,38 @@ class InventoryViewModel @Inject constructor(
     private suspend fun syncCatalogFromServer() {
         if (!syncPreferences.isEnabled) return
 
-        try {
-            val remoteModels = inventorySyncRepository.fetchCatalogModels()
-            if (remoteModels.isEmpty()) return
+        catalogSyncMutex.withLock {
+            try {
+                val remoteModels = inventorySyncRepository.fetchCatalogModels()
+                if (remoteModels.isEmpty()) return
 
-            val localModels = remoteModels.map { remote ->
-                CatalogModelEntity(
-                    id = remote.id,
-                    code = remote.code,
-                    name = remote.name,
-                    sizeMin = remote.sizeMin,
-                    sizeMax = remote.sizeMax,
-                    pairsPerBox = remote.pairsPerBox,
-                    isActive = remote.isActive,
-                    imageUri = remote.imageUri?.let { imageUri ->
-                        if (imageUri.startsWith("/")) {
-                            syncPreferences.baseUrl.trimEnd('/') + imageUri
-                        } else {
-                            imageUri
-                        }
-                    },
-                    createdAt = remote.createdAt,
-                    updatedAt = remote.updatedAt
-                )
+                val localModels = remoteModels.map { remote ->
+                    CatalogModelEntity(
+                        id = remote.id,
+                        code = remote.code,
+                        name = remote.name,
+                        sizeMin = remote.sizeMin,
+                        sizeMax = remote.sizeMax,
+                        pairsPerBox = remote.pairsPerBox,
+                        isActive = remote.isActive,
+                        imageUri = remote.imageUri?.let { imageUri ->
+                            if (imageUri.startsWith("/")) {
+                                syncPreferences.baseUrl.trimEnd('/') + imageUri
+                            } else {
+                                imageUri
+                            }
+                        },
+                        createdAt = remote.createdAt,
+                        updatedAt = remote.updatedAt
+                    )
+                }
+
+                dao.clearCatalogModels()
+                dao.insertCatalogModels(localModels)
+                Log.i("InventoryVM", "Synced ${localModels.size} catalog models from central backend")
+            } catch (e: Exception) {
+                Log.e("InventoryVM", "Failed to sync central catalog models", e)
             }
-
-            dao.clearCatalogModels()
-            dao.insertCatalogModels(localModels)
-            Log.i("InventoryVM", "Synced ${localModels.size} catalog models from central backend")
-        } catch (e: Exception) {
-            Log.e("InventoryVM", "Failed to sync central catalog models", e)
         }
     }
 
@@ -219,6 +243,72 @@ class InventoryViewModel @Inject constructor(
                 },
                 createdAt = payload["createdAt"]?.toLongOrNull() ?: event.timestamp,
                 updatedAt = payload["updatedAt"]?.toLongOrNull() ?: event.timestamp
+            )
+        )
+    }
+
+    private suspend fun syncUsersFromServer() {
+        if (!syncPreferences.isEnabled) return
+
+        try {
+            val remoteUsers = inventorySyncRepository.fetchUsers()
+            val localUsers = dao.getAllUsers().first()
+            if (remoteUsers.isEmpty()) {
+                localUsers.forEach { user ->
+                    inventorySyncRepository.sendInventoryEvent(
+                        InventorySyncEventDto(
+                            eventId = UUID.randomUUID().toString(),
+                            entityType = "user",
+                            action = "upsert",
+                            payload = mapOf(
+                                "id" to user.id,
+                                "name" to user.name,
+                                "pin" to user.pin,
+                                "role" to user.role
+                            ),
+                            userId = currentUser.value?.id ?: "system",
+                            deviceId = "android-device-${UUID.randomUUID()}"
+                        )
+                    )
+                }
+                if (localUsers.isNotEmpty()) {
+                    Log.i("InventoryVM", "Bootstrapped ${localUsers.size} local users to central backend")
+                }
+                return
+            }
+
+            val remoteIds = remoteUsers.map { it.id }.toSet()
+            localUsers.filter { it.id !in remoteIds }.forEach { dao.deleteUser(it.id) }
+
+            remoteUsers.forEach { remote ->
+                dao.insertUser(
+                    UserEntity(
+                        id = remote.id,
+                        name = remote.name,
+                        pin = remote.pin,
+                        role = remote.role
+                    )
+                )
+            }
+            Log.i("InventoryVM", "Synced ${remoteUsers.size} users from central backend")
+        } catch (e: Exception) {
+            Log.e("InventoryVM", "Failed to sync central users", e)
+        }
+    }
+
+    private suspend fun applyUserEvent(event: InventorySyncEventDto) {
+        val userId = event.payload["id"] ?: return
+        if (event.action == "delete") {
+            dao.deleteUser(userId)
+            return
+        }
+
+        dao.insertUser(
+            UserEntity(
+                id = userId,
+                name = event.payload["name"] ?: return,
+                pin = event.payload["pin"] ?: return,
+                role = event.payload["role"] ?: "OPERADOR"
             )
         )
     }
@@ -290,12 +380,32 @@ class InventoryViewModel @Inject constructor(
     }
 
     fun searchQRByUuid(query: String) {
-        viewModelScope.launch {
-            if (query.isBlank()) {
+        qrSearchJob?.cancel()
+        qrSearchJob = viewModelScope.launch {
+            val normalizedQuery = query.trim().uppercase()
+            if (normalizedQuery.isBlank()) {
                 _qrSearchResults.value = emptyList()
                 return@launch
             }
-            _qrSearchResults.value = dao.searchProductsByUuid(query)
+            delay(250)
+            _qrSearchResults.value = dao.searchProductsByUuid(normalizedQuery)
+        }
+    }
+
+    fun loadMoreEntryMovements() {
+        if (_isLoadingEntryMovements.value || !hasMoreEntryMovements) return
+
+        viewModelScope.launch {
+            _isLoadingEntryMovements.value = true
+            try {
+                val pageSize = 50
+                val page = dao.getEntryMovements(pageSize, entryMovementsOffset)
+                _entryMovements.update { current -> current + page }
+                entryMovementsOffset += page.size
+                hasMoreEntryMovements = page.size == pageSize
+            } finally {
+                _isLoadingEntryMovements.value = false
+            }
         }
     }
 

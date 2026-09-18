@@ -39,6 +39,8 @@ import com.punteradigital.inventory.ui.theme.DispatchGreen
 import com.punteradigital.inventory.ui.theme.StandByAmber
 import java.text.SimpleDateFormat
 import java.util.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -516,10 +518,15 @@ private fun PreviewTab(
                         horizontalArrangement = Arrangement.spacedBy(16.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        val qrBitmap = remember(label.uuid) { generateQrBitmap(label.uuid, 120) }
-                        if (qrBitmap != null) {
+                        val qrBitmap by produceState<Bitmap?>(initialValue = null, key1 = label.uuid) {
+                            value = withContext(Dispatchers.Default) {
+                                generateQrBitmap(label.uuid, 120)
+                            }
+                        }
+                        val bitmap = qrBitmap
+                        if (bitmap != null) {
                             Image(
-                                bitmap = qrBitmap.asImageBitmap(),
+                                bitmap = bitmap.asImageBitmap(),
                                 contentDescription = "QR Code",
                                 modifier = Modifier.size(80.dp)
                             )

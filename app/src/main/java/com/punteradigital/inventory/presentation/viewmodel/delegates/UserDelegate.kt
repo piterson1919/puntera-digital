@@ -26,6 +26,16 @@ fun InventoryViewModel.createUser(name: String, pin: String, role: String) {
                 role = role
             )
             dao.insertUser(user)
+            syncInventoryChange(
+                entityType = "user",
+                action = "upsert",
+                payload = mapOf(
+                    "id" to user.id,
+                    "name" to user.name,
+                    "pin" to user.pin,
+                    "role" to user.role
+                )
+            )
             emitUiState(InventoryUiState.SuccessMovement("Usuario '$name' creado exitosamente con rol $role"))
         } catch (e: Exception) {
             emitUiState(InventoryUiState.Error("Error al crear usuario: ${e.message}"))
@@ -56,6 +66,11 @@ fun InventoryViewModel.deleteUser(userId: String) {
             }
 
             dao.deleteUser(userId)
+            syncInventoryChange(
+                entityType = "user",
+                action = "delete",
+                payload = mapOf("id" to userId)
+            )
             emitUiState(InventoryUiState.SuccessMovement("Usuario '${user.name}' eliminado."))
         } catch (e: Exception) {
             emitUiState(InventoryUiState.Error("Error al eliminar usuario: ${e.message}"))

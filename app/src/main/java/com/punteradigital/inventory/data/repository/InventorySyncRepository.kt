@@ -6,6 +6,7 @@ import com.punteradigital.inventory.data.remote.CatalogModelSyncDto
 import com.punteradigital.inventory.data.remote.InventoryRealtimeClient
 import com.punteradigital.inventory.data.remote.InventorySyncEventDto
 import com.punteradigital.inventory.data.remote.InventorySyncService
+import com.punteradigital.inventory.data.remote.UserSyncDto
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -28,6 +29,18 @@ class InventorySyncRepository @Inject constructor(
             response.body().orEmpty()
         } catch (e: Exception) {
             Log.e("InventorySyncRepository", "Error fetching catalog models from central backend", e)
+            emptyList()
+        }
+    }
+
+    suspend fun fetchUsers(): List<UserSyncDto> {
+        if (!syncPreferences.isEnabled) return emptyList()
+        return try {
+            val response = service.getUsers()
+            Log.i("InventorySyncRepository", "GET ${syncPreferences.baseUrl}api/users -> ${response.code()} ${response.message()}")
+            response.body().orEmpty()
+        } catch (e: Exception) {
+            Log.e("InventorySyncRepository", "Error fetching users from central backend", e)
             emptyList()
         }
     }

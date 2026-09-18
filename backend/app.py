@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -65,6 +65,17 @@ class CatalogModel(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(String, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    pin = Column(String, nullable=False)
+    role = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 Base.metadata.create_all(bind=engine)
 
 connected_clients = set()
@@ -86,6 +97,29 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Inventory Sync Server", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def log_http_requests(request: Request, call_next):
+    started_at = asyncio.get_running_loop().time()
+    try:
+        response = await call_next(request)
+    except Exception as exc:
+        elapsed_ms = (asyncio.get_running_loop().time() - started_at) * 1000
+        print(
+            f"[HTTP] {request.method} {request.url.path} -> ERROR {type(exc).__name__} "
+            f"({elapsed_ms:.1f} ms)",
+            flush=True,
+        )
+        raise
+
+    elapsed_ms = (asyncio.get_running_loop().time() - started_at) * 1000
+    print(
+        f"[HTTP] {request.method} {request.url.path} -> {response.status_code} "
+        f"({elapsed_ms:.1f} ms)",
+        flush=True,
+    )
+    return response
 
 app.add_middleware(
     CORSMiddleware,
@@ -181,6 +215,26 @@ async def get_catalog_models():
                 "updatedAt": int(model.updated_at.timestamp() * 1000) if model.updated_at else 0,
             }
             for model in models
+        ]
+    finally:
+        db.close()
+
+
+@app.get("/api/users")
+async def get_users():
+    db = SessionLocal()
+    try:
+        users = db.query(User).order_by(User.name.asc()).all()
+        return [
+            {
+                "id": user.id,
+                "name": user.name,
+                "pin": user.pin,
+                "role": user.role,
+                "createdAt": int(user.created_at.timestamp() * 1000) if user.created_at else 0,
+                "updatedAt": int(user.updated_at.timestamp() * 1000) if user.updated_at else 0,
+            }
+            for user in users
         ]
     finally:
         db.close()
@@ -283,6 +337,27 @@ async def sync_inventory_event(event: InventoryEventDto):
             if event.action == "delete":
                 db.delete(model)
 
+        elif event.entityType == "user":
+            payload = event.payload
+            user_id = payload.get("id")
+            if not user_id:
+                raise HTTPException(status_code=400, detail="user id required")
+
+            user = db.query(User).filter(User.id == user_id).first()
+            if event.action in ("create", "upsert"):
+                if user is None:
+                    user = User(id=user_id)
+                user.name = payload.get("name", user.name if user.name is not None else "")
+                user.pin = payload.get("pin", user.pin if user.pin is not None else "")
+                user.role = payload.get("role", user.role if user.role is not None else "OPERADOR")
+                user.updated_at = datetime.utcnow()
+                if user.created_at is None:
+                    user.created_at = datetime.utcnow()
+                db.add(user)
+            elif event.action == "delete":
+                if user is not None:
+                    db.delete(user)
+
         db.commit()
         await broadcast_event(event)
         print(f"[SYNC] accepted and saved {event.entityType}/{event.action}")
@@ -304,4 +379,4 @@ async def sync_inventory_batch(events: List[InventoryEventDto]):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app:app", host="0.0.0.0", port=8081, reload=False)
+    uvicorn.run("app:app", host="192.168.0.121", port=8081, reload=False)

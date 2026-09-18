@@ -32,12 +32,25 @@ data class CatalogModelSyncDto(
     val updatedAt: Long = System.currentTimeMillis()
 )
 
+@Serializable
+data class UserSyncDto(
+    val id: String,
+    val name: String,
+    val pin: String,
+    val role: String,
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis()
+)
+
 interface InventorySyncService {
     @GET("api/inventory")
     suspend fun getInventorySnapshot(): Response<List<Map<String, String>>>
 
     @GET("api/catalog/models")
     suspend fun getCatalogModels(): Response<List<CatalogModelSyncDto>>
+
+    @GET("api/users")
+    suspend fun getUsers(): Response<List<UserSyncDto>>
 
     @POST("api/inventory/sync")
     suspend fun sendInventoryChange(@Body event: InventorySyncEventDto): Response<Unit>

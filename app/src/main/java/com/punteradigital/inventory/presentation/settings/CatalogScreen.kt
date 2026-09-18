@@ -25,6 +25,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.punteradigital.inventory.R
 import com.punteradigital.inventory.data.local.entity.CatalogModelEntity
 import com.punteradigital.inventory.presentation.components.ButtonType
@@ -99,6 +100,8 @@ fun CatalogScreen(
 
 @Composable
 fun CatalogItemCard(item: CatalogModelEntity, onClick: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -120,7 +123,13 @@ fun CatalogItemCard(item: CatalogModelEntity, onClick: () -> Unit) {
 
             if (item.imageUri != null) {
                 AsyncImage(
-                    model = item.imageUri,
+                    model = ImageRequest.Builder(context)
+                        .data(item.imageUri)
+                        .size(200)
+                        .memoryCacheKey("catalog-${item.id}-${item.updatedAt}")
+                        .diskCacheKey("catalog-${item.id}-${item.updatedAt}")
+                        .crossfade(false)
+                        .build(),
                     contentDescription = item.name,
                     modifier = Modifier
                         .size(100.dp)

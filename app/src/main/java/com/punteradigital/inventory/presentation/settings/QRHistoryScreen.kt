@@ -5,6 +5,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -32,6 +33,8 @@ import com.punteradigital.inventory.presentation.viewmodel.*
 import com.punteradigital.inventory.ui.theme.*
 import java.text.SimpleDateFormat
 import java.util.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -39,7 +42,8 @@ fun QRHistoryScreen(
     viewModel: InventoryViewModel,
     onBack: () -> Unit
 ) {
-    val entryMovements by viewModel.entryMovements.collectAsState(initial = emptyList())
+    val entryMovements by viewModel.entryMovements.collectAsState()
+    val isLoadingEntryMovements by viewModel.isLoadingEntryMovements.collectAsState()
     val searchResults by viewModel.qrSearchResults.collectAsState()
     var searchQuery by remember { mutableStateOf("") }
     var showQRDialog by remember { mutableStateOf<String?>(null) }
@@ -47,6 +51,17 @@ fun QRHistoryScreen(
 
     val sdf = remember { SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()) }
     val stf = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
+    val historyListState = rememberLazyListState()
+
+    LaunchedEffect(historyListState) {
+        snapshotFlow {
+            historyListState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+        }.collect { lastVisibleIndex ->
+            if (lastVisibleIndex >= historyListState.layoutInfo.totalItemsCount - 5) {
+                viewModel.loadMoreEntryMovements()
+            }
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -148,6 +163,7 @@ fun QRHistoryScreen(
                     }
                 } else {
                     LazyColumn(
+                        state = historyListState,
                         verticalArrangement = Arrangement.spacedBy(16.dp),
                         contentPadding = PaddingValues(bottom = 24.dp)
                     ) {
@@ -185,6 +201,16 @@ fun QRHistoryScreen(
                                     onShowQR = { showQRDialog = movement.uuid }
                                 )
                             }
+                            if (date == groupedByDate.keys.lastOrNull() && isLoadingEntryMovements) {
+                                item {
+                                    Box(
+                                        modifier = Modifier.fillMaxWidth().padding(12.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -194,7 +220,9 @@ fun QRHistoryScreen(
         // QR Dialog
         if (showQRDialog != null) {
             val uuid = showQRDialog!!
-            val qrBitmap = remember(uuid) { generateQRBitmap(uuid, 512) }
+            val qrBitmap by produceState<Bitmap?>(initialValue = null, key1 = uuid) {
+                value = withContext(Dispatchers.Default) { generateQRBitmap(uuid, 512) }
+            }
 
             AlertDialog(
                 onDismissRequest = { showQRDialog = null },
@@ -210,9 +238,9 @@ fun QRHistoryScreen(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        if (qrBitmap != null) {
+                        qrBitmap?.let { bitmap ->
                             Image(
-                                bitmap = qrBitmap.asImageBitmap(),
+                                bitmap = bitmap.asImageBitmap(),
                                 contentDescription = "QR Code for $uuid",
                                 modifier = Modifier.size(256.dp)
                             )

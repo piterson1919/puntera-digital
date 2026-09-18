@@ -255,9 +255,9 @@ interface InventoryDao {
     @Query("SELECT * FROM products WHERE uuid LIKE :query || '%' ORDER BY createdAt DESC LIMIT 50")
     suspend fun searchProductsByUuid(query: String): List<ProductEntity>
 
-    /** Get all entry movements grouped by date (for QR history) */
-    @Query("SELECT * FROM movements WHERE type = 'IN' ORDER BY timestamp DESC")
-    fun getEntryMovements(): Flow<List<MovementEntity>>
+    /** Get a page of entry movements for QR history. */
+    @Query("SELECT * FROM movements WHERE type = 'IN' ORDER BY timestamp DESC LIMIT :limit OFFSET :offset")
+    suspend fun getEntryMovements(limit: Int, offset: Int): List<MovementEntity>
 
     // ═══════════════════════════════════════════════════════════════
     // LABELS / EMPAQUE (Pre-Entry) QUERIES

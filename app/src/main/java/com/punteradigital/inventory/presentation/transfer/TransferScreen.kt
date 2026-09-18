@@ -220,7 +220,7 @@ fun TransferScreen(
                                     .also { analysis ->
                                         val barcodeScanner = BarcodeScanning.getClient()
 
-                                        analysis.setAnalyzer(ContextCompat.getMainExecutor(ctx)) { imageProxy ->
+                                        analysis.setAnalyzer(com.punteradigital.inventory.presentation.scanner.components.CameraAnalysisExecutor.executor) { imageProxy ->
                                             if (isPaused) {
                                                 imageProxy.close()
                                                 return@setAnalyzer

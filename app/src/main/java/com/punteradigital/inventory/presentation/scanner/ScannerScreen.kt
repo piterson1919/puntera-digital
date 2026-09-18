@@ -4,15 +4,10 @@ import android.Manifest
 import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.camera.core.*
-import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.camera.view.PreviewView
+import androidx.camera.core.CameraControl
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -27,21 +22,22 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import com.google.mlkit.vision.barcode.BarcodeScanning
-import com.google.mlkit.vision.barcode.common.Barcode
-import com.google.mlkit.vision.common.InputImage
 import com.punteradigital.inventory.domain.model.BajaReason
-import com.punteradigital.inventory.domain.model.Origin
 import com.punteradigital.inventory.presentation.viewmodel.InventoryViewModel
-import com.punteradigital.inventory.presentation.viewmodel.*
 import com.punteradigital.inventory.presentation.viewmodel.InventoryUiState
 import com.punteradigital.inventory.presentation.viewmodel.ScannedInfo
 import com.punteradigital.inventory.presentation.components.*
+import com.punteradigital.inventory.presentation.scanner.components.ManualScanDetailSheet
+import com.punteradigital.inventory.presentation.scanner.components.ScannerCameraPreview
+import com.punteradigital.inventory.presentation.scanner.components.vibrateError
+import com.punteradigital.inventory.presentation.scanner.components.vibrateSuccess
 import com.punteradigital.inventory.ui.theme.*
+import com.punteradigital.inventory.presentation.viewmodel.confirmLabelEntry
+import com.punteradigital.inventory.presentation.viewmodel.getScannedInfo
+import com.punteradigital.inventory.presentation.viewmodel.processMuestra
+import com.punteradigital.inventory.presentation.viewmodel.processQualityBaja
+import com.punteradigital.inventory.presentation.viewmodel.processStandBy
 import kotlinx.coroutines.launch
 
 /**
@@ -68,6 +64,7 @@ fun UnifiedScannerScreen(
     var isPaused by remember { mutableStateOf(false) }
     var cameraControl by remember { mutableStateOf<CameraControl?>(null) }
     var isFlashOn by remember { mutableStateOf(false) }
+    val isRackLocked by viewModel.isRackLocked.collectAsState()
 
     // Manual mode state
     var scannedResult by remember { mutableStateOf<ScannedInfo?>(null) }
@@ -88,9 +85,6 @@ fun UnifiedScannerScreen(
     var pendingStandByUuid by remember { mutableStateOf("") }
     var clienteInput by remember { mutableStateOf("") }
     var observacionesInput by remember { mutableStateOf("") }
-
-    // Verify mode state
-    var verifyResult by remember { mutableStateOf<String?>(null) }
 
     // UUID-not-found feedback
     var notFoundUuid by remember { mutableStateOf<String?>(null) }
@@ -143,7 +137,7 @@ fun UnifiedScannerScreen(
         else -> MaterialTheme.colorScheme.primary
     }
 
-    val isRapid = scanType == "RAPID" || (moduleName == "INBOUND_EMPAQUE" && viewModel.isRackLocked.value)
+    val isRapid = scanType == "RAPID" || (moduleName == "INBOUND_EMPAQUE" && isRackLocked)
 
     fun processScannedUuid(uuid: String) {
         Log.d("Scanner", "processScannedUuid called with: $uuid, module=$moduleName, isRapid=$isRapid")
@@ -159,7 +153,7 @@ fun UnifiedScannerScreen(
         }
 
         if (moduleName == "INBOUND_EMPAQUE") {
-            val isLocked = viewModel.isRackLocked.value
+            val isLocked = isRackLocked
             val lockedRackStr = viewModel.lockedRack.value ?: "A1"
             if (isLocked) {
                 if (uuid in scannedUuids) return
@@ -316,67 +310,12 @@ fun UnifiedScannerScreen(
         }
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
-            // Camera Preview
             if (hasCameraPermission) {
-                AndroidView(
-                    factory = { ctx ->
-                        val previewView = PreviewView(ctx)
-                        val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
-
-                        cameraProviderFuture.addListener({
-                            val cameraProvider = cameraProviderFuture.get()
-                            val preview = Preview.Builder().build().also {
-                                it.surfaceProvider = previewView.surfaceProvider
-                            }
-
-                            val imageAnalysis = ImageAnalysis.Builder()
-                                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                                .build()
-                                .also { analysis ->
-                                    val barcodeScanner = BarcodeScanning.getClient()
-
-                                    analysis.setAnalyzer(ContextCompat.getMainExecutor(ctx)) { imageProxy ->
-                                        if (isPaused) {
-                                            imageProxy.close()
-                                            return@setAnalyzer
-                                        }
-
-                                        @androidx.annotation.OptIn(ExperimentalGetImage::class)
-                                        val mediaImage = imageProxy.image
-                                        if (mediaImage != null) {
-                                            val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
-
-                                            barcodeScanner.process(image)
-                                                .addOnSuccessListener { barcodes ->
-                                                    for (barcode in barcodes) {
-                                                        barcode.rawValue?.let { qrValue ->
-                                                            if (qrValue.startsWith("FS-") || qrValue.startsWith("SF-")) {
-                                                                processScannedUuid(qrValue)
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                                .addOnCompleteListener { imageProxy.close() }
-                                        } else {
-                                            imageProxy.close()
-                                        }
-                                    }
-                                }
-
-                            try {
-                                cameraProvider.unbindAll()
-                                val camera = cameraProvider.bindToLifecycle(
-                                    lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA,
-                                    preview, imageAnalysis
-                                )
-                                cameraControl = camera.cameraControl
-                            } catch (exc: Exception) {
-                                Log.e("Scanner", "Camera error", exc)
-                            }
-                        }, ContextCompat.getMainExecutor(ctx))
-                        previewView
-                    },
-                    modifier = Modifier.fillMaxSize()
+                ScannerCameraPreview(
+                    lifecycleOwner = lifecycleOwner,
+                    isPaused = isPaused,
+                    onQrScanned = ::processScannedUuid,
+                    onCameraControlReady = { cameraControl = it }
                 )
             }
 
@@ -754,342 +693,5 @@ fun UnifiedScannerScreen(
                 )
             }
         }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun ManualScanDetailSheet(
-    viewModel: InventoryViewModel,
-    scannedInfo: ScannedInfo?,
-    qrCode: String,
-    moduleName: String,
-    onConfirm: (String, List<String>?) -> Unit,
-    onCancel: () -> Unit
-) {
-    var selectedReason by remember { mutableStateOf("") }
-    var reasonExpanded by remember { mutableStateOf(false) }
-
-    // Child breakdown query lists
-    val childLabelsState = produceState<List<com.punteradigital.inventory.data.local.entity.LabelEntity>>(initialValue = emptyList(), scannedInfo) {
-        if (scannedInfo is ScannedInfo.Label && scannedInfo.entity.labelType == "MASTER_BOX") {
-            value = viewModel.dao.getChildrenLabels(scannedInfo.entity.uuid)
-        }
-    }
-
-    val childProductsState = produceState<List<com.punteradigital.inventory.data.local.entity.ProductEntity>>(initialValue = emptyList(), scannedInfo) {
-        if (scannedInfo is ScannedInfo.Master) {
-            value = viewModel.dao.getChildrenOfMasterBox(scannedInfo.entity.uuid)
-        }
-    }
-
-    val checkedUuids = remember { mutableStateListOf<String>() }
-
-    LaunchedEffect(childLabelsState.value, childProductsState.value) {
-        checkedUuids.clear()
-        if (childLabelsState.value.isNotEmpty()) {
-            checkedUuids.addAll(childLabelsState.value.map { it.uuid })
-        }
-        if (childProductsState.value.isNotEmpty()) {
-            checkedUuids.addAll(childProductsState.value.map { it.uuid })
-        }
-    }
-
-    val title = when (moduleName) {
-        "STANDBY" -> "Confirmar Stand-By"
-        "QUALITY" -> "Registrar Baja"
-        "VERIFY" -> "Información del UUID"
-        else -> "Confirmar Acción"
-    }
-
-    Column(modifier = Modifier.padding(24.dp).fillMaxWidth()) {
-        Text(title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(16.dp))
-
-        // Product detail card
-        KineticCard(
-            padding = 16.dp
-        ) {
-            when (scannedInfo) {
-                is ScannedInfo.Master -> {
-                    Column {
-                        Text("📦 Caja Master", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                        Text("UUID: $qrCode", style = MaterialTheme.typography.bodyMedium)
-                        Text("Modelo: ${scannedInfo.entity.model}", style = MaterialTheme.typography.bodyMedium)
-                        Text("Talla: ${scannedInfo.entity.size}", style = MaterialTheme.typography.bodyMedium)
-                        Text("Unidades: ${scannedInfo.entity.activeChildCount}/${scannedInfo.entity.childCount}",
-                            style = MaterialTheme.typography.bodyMedium)
-                        if (scannedInfo.entity.status == "PENDIENTE_POR_RELLENAR") {
-                            Spacer(Modifier.height(4.dp))
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = WarningOrange.copy(alpha = 0.15f)
-                            ) {
-                                Text(
-                                    "⚠ PENDIENTE POR RELLENAR",
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = WarningOrange
-                                )
-                            }
-                        }
-                        Text("Origen: ${scannedInfo.entity.origin}", style = MaterialTheme.typography.bodyMedium,
-                            color = if (scannedInfo.entity.origin == "FOOT_SAFE") FootSafeYellow else SafetyCobalt)
-                    }
-                }
-                is ScannedInfo.UnitInfo -> {
-                    Column {
-                        Text("👟 Unidad Individual", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                        Text("UUID: $qrCode", style = MaterialTheme.typography.bodyMedium)
-                        Text("Modelo: ${scannedInfo.entity.model}", style = MaterialTheme.typography.bodyMedium)
-                        Text("Talla: ${scannedInfo.entity.size}", style = MaterialTheme.typography.bodyMedium)
-                        Text("Lote: ${scannedInfo.entity.lot}", style = MaterialTheme.typography.bodyMedium)
-                        Text("Estado: ${scannedInfo.entity.status}", style = MaterialTheme.typography.bodyMedium)
-                        Text("Origen: ${scannedInfo.entity.origin}", style = MaterialTheme.typography.bodyMedium,
-                            color = if (scannedInfo.entity.origin == "FOOT_SAFE") FootSafeYellow else SafetyCobalt)
-                        if (scannedInfo.entity.parentUuid != null) {
-                            Text("Caja Master: ${scannedInfo.entity.parentUuid}", style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
-                }
-                is ScannedInfo.Label -> {
-                    val label = scannedInfo.entity
-                    Column {
-                        Text("🏷 Etiqueta de Empaque", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                        Text("UUID: $qrCode", style = MaterialTheme.typography.bodyMedium)
-                        Text("Modelo: ${label.model}", style = MaterialTheme.typography.bodyMedium)
-                        Text("Talla: ${label.size}", style = MaterialTheme.typography.bodyMedium)
-                        Text("Lote: ${label.lot}", style = MaterialTheme.typography.bodyMedium)
-                        Text("Tipo: ${if (label.labelType == "MASTER_BOX") "CAJA MASTER" else "UNIDAD INDIVIDUAL"}", style = MaterialTheme.typography.bodyMedium)
-                        Text("Origen: ${label.origin}", style = MaterialTheme.typography.bodyMedium,
-                            color = if (label.origin == "FOOT_SAFE") FootSafeYellow else SafetyCobalt)
-                    }
-                }
-                null -> {
-                    Column {
-                        Text("❌ No encontrado", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
-                        Text("UUID: $qrCode", style = MaterialTheme.typography.bodyMedium)
-                    }
-                }
-            }
-        }
-
-        // Checklist breakdown of Master Box
-        if (childLabelsState.value.isNotEmpty() || childProductsState.value.isNotEmpty()) {
-            Spacer(Modifier.height(16.dp))
-            Text(
-                "Desglose de Caja Master",
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary
-            )
-            Text(
-                "Desmarque los pares que falten físicamente:",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(Modifier.height(8.dp))
-            
-            val totalChildCount = childLabelsState.value.size + childProductsState.value.size
-            Text(
-                "Contenido Verificado: ${checkedUuids.size} / $totalChildCount pares",
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Bold,
-                color = if (checkedUuids.size == totalChildCount) DispatchGreen else WarningOrange
-            )
-            Spacer(Modifier.height(8.dp))
-
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 180.dp),
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerLow,
-                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-            ) {
-                LazyColumn(
-                    contentPadding = PaddingValues(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    if (childLabelsState.value.isNotEmpty()) {
-                        items(childLabelsState.value) { label ->
-                            val isChecked = label.uuid in checkedUuids
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .kineticClick {
-                                        if (isChecked) checkedUuids.remove(label.uuid)
-                                        else checkedUuids.add(label.uuid)
-                                    }
-                                    .padding(vertical = 4.dp, horizontal = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Checkbox(
-                                    checked = isChecked,
-                                    onCheckedChange = { checked ->
-                                        if (checked == true) {
-                                            if (label.uuid !in checkedUuids) checkedUuids.add(label.uuid)
-                                        } else {
-                                            checkedUuids.remove(label.uuid)
-                                        }
-                                    }
-                                )
-                                Spacer(Modifier.width(8.dp))
-                                Column {
-                                    Text(label.uuid, style = MaterialTheme.typography.bodyMedium, fontFamily = SpaceGrotesk, fontWeight = FontWeight.SemiBold)
-                                    Text("Talla ${label.size} | Lote ${label.lot}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                            }
-                        }
-                    } else {
-                        items(childProductsState.value) { product ->
-                            val isChecked = product.uuid in checkedUuids
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .kineticClick {
-                                        if (isChecked) checkedUuids.remove(product.uuid)
-                                        else checkedUuids.add(product.uuid)
-                                    }
-                                    .padding(vertical = 4.dp, horizontal = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Checkbox(
-                                    checked = isChecked,
-                                    onCheckedChange = { checked ->
-                                        if (checked == true) {
-                                            if (product.uuid !in checkedUuids) checkedUuids.add(product.uuid)
-                                        } else {
-                                            checkedUuids.remove(product.uuid)
-                                        }
-                                    }
-                                )
-                                Spacer(Modifier.width(8.dp))
-                                Column {
-                                    Text(product.uuid, style = MaterialTheme.typography.bodyMedium, fontFamily = SpaceGrotesk, fontWeight = FontWeight.SemiBold)
-                                    Text("Talla ${product.size} | Lote ${product.lot} | Estado ${product.status}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Quality reason selector
-        if (moduleName == "QUALITY") {
-            Spacer(Modifier.height(16.dp))
-            ExposedDropdownMenuBox(
-                expanded = reasonExpanded,
-                onExpandedChange = { reasonExpanded = it }
-            ) {
-                KineticTextField(
-                    value = selectedReason,
-                    onValueChange = {},
-                    readOnly = true,
-                    label = "Motivo de Baja *",
-                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = reasonExpanded) },
-                    modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable, true).fillMaxWidth()
-                )
-                ExposedDropdownMenu(expanded = reasonExpanded, onDismissRequest = { reasonExpanded = false }) {
-                    BajaReason.entries.forEach { reason ->
-                        DropdownMenuItem(
-                            text = { Text(reason.displayName) },
-                            onClick = { selectedReason = reason.displayName; reasonExpanded = false }
-                        )
-                    }
-                }
-            }
-        }
-
-        // Rack selection for INBOUND_EMPAQUE
-        if (moduleName == "INBOUND_EMPAQUE") {
-            Spacer(Modifier.height(16.dp))
-            var rackExpanded by remember { mutableStateOf(false) }
-            val rackLocations = listOf("A1", "A2", "A3", "B1", "B2", "B3", "C1", "C2", "C3", "PISO")
-            
-            ExposedDropdownMenuBox(
-                expanded = rackExpanded,
-                onExpandedChange = { rackExpanded = it }
-            ) {
-                KineticTextField(
-                    value = if (selectedReason.isEmpty()) "📍 Seleccionar Rack (ej: A1)" else "📍 Rack: $selectedReason",
-                    onValueChange = {},
-                    readOnly = true,
-                    label = "Ubicación en Rack *",
-                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = rackExpanded) },
-                    modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable, true).fillMaxWidth()
-                )
-                ExposedDropdownMenu(expanded = rackExpanded, onDismissRequest = { rackExpanded = false }) {
-                    rackLocations.forEach { rack ->
-                        DropdownMenuItem(
-                            text = { Text(if (rack == "PISO") "📦 PISO (Sin rack)" else "📍 $rack") },
-                            onClick = { 
-                                selectedReason = rack
-                                rackExpanded = false 
-                            }
-                        )
-                    }
-                }
-            }
-        }
-
-        Spacer(Modifier.height(24.dp))
-
-        KineticButton(
-            text = when (moduleName) {
-                "VERIFY" -> "CERRAR"
-                else -> "CONFIRMAR"
-            },
-            onClick = {
-                val hasChildren = childLabelsState.value.isNotEmpty() || childProductsState.value.isNotEmpty()
-                val checklistResult = if (hasChildren) checkedUuids.toList() else null
-                
-                if (moduleName == "QUALITY" || moduleName == "INBOUND_EMPAQUE") {
-                    onConfirm(selectedReason, checklistResult)
-                } else {
-                    onConfirm("", checklistResult)
-                }
-            },
-            modifier = Modifier.fillMaxWidth(),
-            enabled = scannedInfo != null && (
-                moduleName == "VERIFY" || 
-                (moduleName == "QUALITY" && selectedReason.isNotEmpty()) || 
-                (moduleName == "INBOUND_EMPAQUE" && selectedReason.isNotEmpty()) ||
-                (moduleName != "QUALITY" && moduleName != "INBOUND_EMPAQUE")
-            ),
-            type = if (moduleName == "VERIFY") ButtonType.SECONDARY else ButtonType.PRIMARY
-        )
-
-        TextButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) {
-            Text("CANCELAR", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
-}
-
-fun vibrateSuccess(context: android.content.Context) {
-    try {
-        val vibrator = context.getSystemService(android.content.Context.VIBRATOR_SERVICE) as? android.os.Vibrator
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-            vibrator?.vibrate(android.os.VibrationEffect.createOneShot(150, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
-        } else {
-            vibrator?.vibrate(150)
-        }
-    } catch (e: Exception) {
-        Log.e("Scanner", "Vibrate error", e)
-    }
-}
-fun vibrateError(context: android.content.Context) {
-    try {
-        val vibrator = context.getSystemService(android.content.Context.VIBRATOR_SERVICE) as? android.os.Vibrator
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-            vibrator?.vibrate(android.os.VibrationEffect.createWaveform(longArrayOf(0, 300, 150, 300), -1))
-        } else {
-            vibrator?.vibrate(longArrayOf(0, 300, 150, 300), -1)
-        }
-    } catch (e: Exception) {
-        Log.e("Scanner", "Vibrate error", e)
     }
 }
